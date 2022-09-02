@@ -1,0 +1,100 @@
+# 0 Script Info -----------------------------------------------------------
+
+# * Author: BA Grobler & T Strydom
+# * Creation Date: 24 Sep 2021
+# * Project: Canopy plant composition and strcuture of Cape subtropical 
+             dune thicket are predicted by levels of fire-exposure gradient
+# * Collaborators: T Strydom, BA Grobler, T Kraaij, RM Cowling
+# * Aim: To explore the compositional patterns of dune thicket exposed to
+# *      different fire frequencies
+
+
+# 1 Initialize: load libraries and data -----------------------------------
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(vegan)
+library(pairwiseAdonis)
+
+raw_data <- read.csv(here("1_Data", "DuneThicket_FireExposure_GuildsCover_Data.csv"),
+                     stringsAsFactors = T, header = T, row.names = 1) %>% 
+  clean_names()   # Creates 'clean' variable names
+
+spp_data <- raw_data %>% 
+  select(-fire_exposure)   # Create dataframe for NMDS analysis
+
+spp_data <- raw_data %>% 
+  select(-fire_exposure) %>% 
+  mutate(total_cover = rowSums(.)) %>% 
+  mutate(hedge_former_prop = hedge_former / total_cover * 100,
+            lateral_spreader_prop = lateral_spreader / total_cover * 100,
+            vertical_grower_prop = vertical_grower / total_cover * 100) %>% 
+  select(contains("_prop"))
+
+row.names(spp_data) <- row.names(raw_data)
+
+# 2 NMDS analaysis of guild cover-abundance data -----------------
+
+# 2.1 NMDS using 2 axes
+nmds_spp_k2 <- metaMDS(spp_data, distance = "bray", k = 2, try = 999)
+stressplot(nmds_spp_k2)   # Non-metric R-square fit = 1; Linear R-sq fit = 0.999
+nmds_spp_k2$stress   # Stress = 0.014: Pretty good, two dimensions should be fine
+
+ordiplot(nmds_spp_k2, type = "n")   # Set up blank ordination plot
+ordihull(nmds_spp_k2, groups = raw_data$fire_exposure, draw = "polygon", col = "grey90", label = F)  # Polygons to indiacte fire exposure groups
+orditorp(nmds_spp_k2, display = "species", col = "red", air = 0.01)   # Plot species in 2D space
+orditorp(nmds_spp_k2, display = "sites", cex = 1.25, air = 0.01)   # Plot transects in 2D space
+
+
+# 3 Cluster analysis of species presence-absence data ---------------------
+
+# calculate Bray-Curtis distance among samples
+spp_dist <- vegdist(spp_data, method = "bray")
+
+# cluster communities using Ward's method
+spp_clust_ward <- hclust(spp_dist, method = "ward.D")
+
+# plot Ward's cluster diagram
+plot(spp_clust_ward, hang = -1, ylab = "Bray-Curtis dissimilarity")
+
+# cluster communities using UPGMA method
+spp_clust_avg <- hclust(spp_dist, method = "average")
+
+# plot UPGMA cluster diagram
+plot(spp_clust_avg, ylab = "Bray-Curtis dissimilarity")
+
+
+# 4 Combo: cluster and NMDS analyses ------------------------------------
+
+# don't plot anything yet
+nmds_fig <- ordiplot(nmds_spp_k2, type = "none")
+
+# add confidence ellipses and bars around habitat types
+ordiellipse(nmds_fig, raw_data$fire_exposure, conf = 0.95, label = F, lty = "dashed", lwd = 3, col = c("#fc8d62", "#66c2a5", "#8da0cb"))
+ordibar(nmds_fig, raw_data$fire_exposure, conf = 0.95, label = T, cex = 0.8, col = c("#fc8d62", "#66c2a5", "#8da0cb"))
+
+# plot just the samples, colour by habitat
+points(nmds_fig, "sites", pch = 15, col = "#66c2a5", select = raw_data$fire_exposure == "Low")
+points(nmds_fig, "sites", pch = 16, col = "#8da0cb", select = raw_data$fire_exposure == "Moderate")
+points(nmds_fig, "sites", pch = 17, col = "#fc8d62", select = raw_data$fire_exposure == "High")
+
+# Guild names
+orditorp(nmds_fig, "species", cex = 0.8, col = "black", air = 0.1)
+
+#points(nmds_fig, "sites", pch = 19, col = cutree(spp_clust_ward, k = 3))
+#ordiellipse(nmds_fig, cutree(spp_clust_ward, k = 3), conf = 0.95, label = TRUE)
+
+# overlay the cluster results we calculated earlier
+ordicluster(nmds_spp_k2, spp_clust_ward, col = "gray")
+
+
+# 5 Statistical tests of similarity ------------------------------
+
+# ANOSIM
+summary(anosim(spp_data, grouping = raw_data$fire_exposure, distance = "bray"))
+plot(anosim(spp_data, grouping = raw_data$fire_exposure, distance = "bray"))
+
+# ADONIS
+adonis(spp_data ~ raw_data$fire_exposure, method = "bray", permutations = 999)
+pairwise.adonis(spp_data, raw_data$fire_exposure)
